@@ -1,0 +1,16 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <Frame name="CampfiresMapPinTemplate" mixin="CampfiresMapPinMixin" enableMouse="true" virtual="true">
+        <Size x="18" y="18"/>
+        <Layers>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Icon" file="Interface\Icons\Spell_Fire_Fire" setAllPoints="true">
+                    <TexCoords left="0.08" right="0.92" top="0.08" bottom="0.92"/>
+                </Texture>
+            </Layer>
+        </Layers>
+        <!-- No OnEnter/OnLeave/OnMouseUp: the map canvas sets its own and asserts if they're already there. -->
+        <Scripts>
+            <OnLoad method="OnLoad"/>
+        </Scripts>
+    </Frame>
+</Ui>

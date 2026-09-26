@@ -1,0 +1,16 @@
+## Interface: 16001, 120000
+## Title: Campfires
+## Notes: When someone sits at a campfire, everyone running Campfires sees it on their world map and minimap.
+## Author: Mike
+## Version: 0.11.0
+## SavedVariables: CampfiresDB
+## IconTexture: Interface\Icons\Spell_Fire_Fire
+## AddonCompartmentFunc: Campfires_OnAddonCompartmentClick
+
+Campfires.lua
+Network.lua
+Sitting.lua
+Commands.lua
+Map.lua
+Map.xml
+UI.lua
