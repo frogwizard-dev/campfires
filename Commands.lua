@@ -89,6 +89,36 @@ AddCommand("minimap", "", "show or hide the minimap button", function()
     Print("Minimap button " .. (Campfires.db.minimapHide and "hidden." or "shown."))
 end)
 
+-- "mallory-Galewyn" -> "Mallory"
+local function PlayerNameFrom(text)
+    local name = text:match("^[^%-%s]+")
+    if not name or not name:match("^[%a\128-\255]+$") then return end
+    return name:sub(1, 1):upper() .. name:sub(2):lower()
+end
+
+AddCommand("ignore", "[name]", "hide someone's fires and name, or list who you're ignoring", function(arg)
+    if arg == "" then
+        local list = Campfires.IgnoredPlayers()
+        Print(#list > 0 and ("Ignoring: " .. table.concat(list, ", ")) or "You're not ignoring anyone.")
+        Print("Anyone on your in-game ignore list is ignored too.")
+        return
+    end
+    local name = PlayerNameFrom(arg)
+    if not name then return Print("That isn't a character name.") end
+    Campfires.IgnorePlayer(name)
+    Print("Ignoring " .. name .. ". /fires unignore " .. name .. " to undo.")
+end)
+
+AddCommand("unignore", "<name>", "see someone's fires again", function(arg)
+    local name = PlayerNameFrom(arg)
+    if not name then return Print("That isn't a character name.") end
+    if Campfires.UnignorePlayer(name) then
+        Print("No longer ignoring " .. name .. ".")
+    else
+        Print(name .. " isn't on your Campfires ignore list.")
+    end
+end)
+
 AddCommand("camp", "", "show what your Camp Benefits buff says is at the camp", function()
     local items = Campfires.ParseItems(Campfires.ItemsFromTooltip(Campfires.CampBenefitsText()))
     if #items == 0 then Print("No Camp Benefits found on you.") end

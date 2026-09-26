@@ -36,6 +36,8 @@ local defaults = {
     extraAuraNames = {},
     wordings = {},
     fires = {},
+    ignored = {}, -- lowercase name -> name, from /fires ignore
+    muted = {},   -- lowercase name -> { name, expires }, sent data no real copy of the addon would
 }
 
 function Campfires.Print(...)
@@ -73,6 +75,9 @@ local function LoadSettings()
     -- older versions would save any wording another player sent
     for id, wording in pairs(db.wordings) do
         if not Campfires.IsCleanWording(wording) then db.wordings[id] = nil end
+    end
+    for key, muted in pairs(db.muted) do
+        if time() >= muted.expires then db.muted[key] = nil end
     end
 
     if not IsOption(db.shareWith, Campfires.SHARE_OPTIONS) then db.shareWith = "all" end
@@ -224,6 +229,7 @@ end
 --   burnsOut       time() it's out by: exact if we saw it placed, otherwise the latest it could be
 --   burnsOutExact  whether burnsOut is exact
 --   items          what's at the camp (see Network.lua)
+--   source         who first told us about it
 
 function Campfires.FindFire(position)
     for _, fire in ipairs(Campfires.fires) do
@@ -393,6 +399,26 @@ function Campfires.RemoveFire(position)
     local fires = Campfires.fires
     for i = #fires, 1, -1 do
         if Campfires.IsSameFire(fires[i], position) then table.remove(fires, i) end
+    end
+    Campfires.Refresh()
+end
+
+-- Drops everything we've heard from someone: them at any fire, and fires only
+-- they told us about that nobody else is at.
+function Campfires.ForgetPlayer(name)
+    local key = name:lower()
+    local fires = Campfires.fires
+    for i = #fires, 1, -1 do
+        local fire = fires[i]
+        for person in pairs(fire.people) do
+            if person:lower() == key then
+                fire.people[person] = nil
+                if fire.unconfirmed then fire.unconfirmed[person] = nil end
+            end
+        end
+        if fire.source and fire.source:lower() == key and not next(fire.people) then
+            table.remove(fires, i)
+        end
     end
     Campfires.Refresh()
 end

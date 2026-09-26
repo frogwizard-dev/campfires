@@ -352,22 +352,81 @@ local function IsPlayerName(name)
     return type(name) == "string" and #name <= 48 and name:match("^[%a\128-\255]+$") ~= nil
 end
 
+local function IsClassName(class)
+    return class == "" or (#class <= 12 and class:match("^%u+$") ~= nil)
+end
+
 -- tonumber() also takes "nan" and "inf", which would make a mess of distances.
 local function ReadNumber(text, min, max)
     local number = tonumber(text)
     if number and number == number and number >= min and number <= max then return number end
 end
 
-local function ReadPosition(fields)
-    local continent = ReadNumber(fields[3], 0, 100000)
-    local worldX, worldY = ReadNumber(fields[4], -100000, 100000), ReadNumber(fields[5], -100000, 100000)
-    if not (continent and worldX and worldY) then return end
-    local position = { continent = continent, worldX = worldX, worldY = worldY }
-    local mapID, mapX, mapY = ReadNumber(fields[6], 1, 1000000), ReadNumber(fields[7], 0, 1), ReadNumber(fields[8], 0, 1)
-    if mapID and mapX and mapY then
-        position.mapID, position.mapX, position.mapY = mapID, mapX, mapY
+-- Ignoring people: your own list, the game's ignore list, and anyone muted for
+-- sending things no real copy of Campfires would.
+
+local STRIKES_TO_MUTE = 3
+local STRIKE_WINDOW = 10 * 60
+local MUTE_TIME = 60 * 60
+
+local strikes = {} -- lowercase name -> { count, since }
+local lastMuteNotice = -math.huge
+
+function Campfires.IsIgnored(name)
+    local key = name:lower()
+    local db = Campfires.db
+    if db.ignored[key] then return true end
+    local muted = db.muted[key]
+    if muted and time() < muted.expires then return true end
+    return C_FriendList.IsIgnored(name) == true
+end
+
+function Campfires.IgnorePlayer(name)
+    Campfires.db.ignored[name:lower()] = name
+    Campfires.ForgetPlayer(name)
+end
+
+function Campfires.UnignorePlayer(name)
+    local key = name:lower()
+    local wasIgnored = Campfires.db.ignored[key] ~= nil or Campfires.db.muted[key] ~= nil
+    Campfires.db.ignored[key], Campfires.db.muted[key], strikes[key] = nil, nil, nil
+    return wasIgnored
+end
+
+function Campfires.IgnoredPlayers()
+    local list = {}
+    for _, name in pairs(Campfires.db.ignored) do table.insert(list, name) end
+    for _, muted in pairs(Campfires.db.muted) do
+        local left = muted.expires - time()
+        if left > 0 then
+            table.insert(list, muted.name .. " (muted for another " .. Campfires.ShortDuration(left) .. ")")
+        end
     end
-    return position
+    table.sort(list)
+    return list
+end
+
+-- Only for things an honest copy of the addon, old or new, never sends. Anything
+-- that can happen by bad timing just gets ignored instead.
+local function Strike(sender)
+    local key, now = sender:lower(), time()
+    local record = strikes[key]
+    if not record or now - record.since > STRIKE_WINDOW then
+        record = { count = 0, since = now }
+        strikes[key] = record
+    end
+    record.count = record.count + 1
+    if record.count < STRIKES_TO_MUTE then return end
+
+    strikes[key] = nil
+    Campfires.db.muted[key] = { name = sender, expires = now + MUTE_TIME }
+    Campfires.ForgetPlayer(sender)
+    -- at most one of these a minute, so a crowd of fake senders can't fill chat
+    if GetTime() - lastMuteNotice >= 60 then
+        lastMuteNotice = GetTime()
+        Campfires.Print(sender .. " is sending fake campfire data, so you won't see anything from them for an hour. "
+            .. "/fires unignore " .. sender .. " to undo.")
+    end
 end
 
 local messageCounts = {}   -- sender -> { since, count }
@@ -394,9 +453,12 @@ local function IsFlooding(sender)
         return false
     end
     counter.count = counter.count + 1
+    if counter.count == RATE_LIMIT + 1 then Strike(sender) end
     return counter.count > RATE_LIMIT
 end
 
+-- Not a strike: someone answering zone questions as you travel can tell you
+-- about a lot of fires honestly.
 local function MayAddFire(sender)
     local now, times = GetTime(), newFiresFrom[sender] or {}
     for i = #times, 1, -1 do
@@ -406,6 +468,30 @@ local function MayAddFire(sender)
     table.insert(times, now)
     newFiresFrom[sender] = times
     return true
+end
+
+-- The position in fields 3-5 (and the map in 6-8, which older versions leave as 0).
+local function ReadPosition(sender, fields)
+    local continent = ReadNumber(fields[3], 0, 100000)
+    local worldX, worldY = ReadNumber(fields[4], -100000, 100000), ReadNumber(fields[5], -100000, 100000)
+    if not (continent and worldX and worldY) then
+        Strike(sender)
+        return
+    end
+    local position = { continent = continent, worldX = worldX, worldY = worldY }
+    local mapID, mapX, mapY = ReadNumber(fields[6], 1, 1000000), ReadNumber(fields[7], 0, 1), ReadNumber(fields[8], 0, 1)
+    if mapID and mapX and mapY then
+        position.mapID, position.mapX, position.mapY = mapID, mapX, mapY
+    end
+    return position
+end
+
+-- Seconds left on a fire. Versions before 0.7 don't send it at all.
+local function ReadBurnTime(sender, text)
+    if not text or text == "" then return end
+    local seconds = ReadNumber(text, 0, Campfires.BURN_TIME)
+    if not seconds then Strike(sender) end
+    return seconds
 end
 
 -- Whether anyone besides `name` is confirmed at the fire right now.
@@ -419,7 +505,7 @@ end
 -- Where an H or R is about, and whether it's a fire we didn't know. Nothing if
 -- the fire's just gone out, or the sender has told us about too many new ones.
 local function ReadFireNews(sender, fields)
-    local position = ReadPosition(fields)
+    local position = ReadPosition(sender, fields)
     if not position then return end
     SomeoneMentioned(position)
     if Campfires.IsReportedOut(position) then return end
@@ -443,24 +529,33 @@ local handlers = {}
 local lastLeft = {} -- sender -> { fire, at }
 
 function handlers.H(sender, fields)
-    local position = ReadFireNews(sender, fields)
+    local class = fields[10] or ""
+    if not IsClassName(class) then return Strike(sender) end
+    local burnTime = ReadBurnTime(sender, fields[11])
+    local position, isNew = ReadFireNews(sender, fields)
     if not position then return end
+
     local fire = Campfires.RecordSighting(position, time(), sender)
-    Campfires.SetClass(fire, sender, fields[10])
+    if isNew then fire.source = sender end
+    Campfires.SetClass(fire, sender, class)
     -- one person can't cut a fire short while other people are sitting at it
     if not OthersAt(fire, sender) then
-        Campfires.LimitBurnTime(fire, ReadNumber(fields[11], 0, Campfires.BURN_TIME), fields[12] == "e")
+        Campfires.LimitBurnTime(fire, burnTime, fields[12] == "e")
     end
     TakeItems(fire, fields[9])
 end
 
 function handlers.R(sender, fields)
+    -- versions before 0.7 had no 15-minute limit, so old news can honestly be old
+    local age = ReadNumber(fields[9], 0, 24 * 60 * 60)
+    if not age then return Strike(sender) end
+    local burnTime = ReadBurnTime(sender, fields[12])
     local position, isNew = ReadFireNews(sender, fields)
-    if not position then return end
-    local age = ReadNumber(fields[9], 0, Campfires.db.linger)
-    if not age then return end
+    if not position or age > Campfires.db.linger or age > Campfires.BURN_TIME then return end
+
     local seenAt = time() - age
     local fire = Campfires.RecordSighting(position, seenAt)
+    if isNew then fire.source = sender end
 
     local count = 0
     for entry in (fields[10] or ""):gmatch("[^,]+") do
@@ -468,9 +563,10 @@ function handlers.R(sender, fields)
         if count > 4 then break end
         local name, class = entry:match("^([^:]+):?(%u*)$")
         name = WithoutRealm(name)
+        if not IsPlayerName(name) then return Strike(sender) end
         -- don't let an old report put us back at a fire we've left
         local isUs = name == Campfires.playerName and not Campfires.IsAtFire()
-        if IsPlayerName(name) and not isUs and (fire.people[name] or 0) < seenAt then
+        if not isUs and not Campfires.IsIgnored(name) and (fire.people[name] or 0) < seenAt then
             fire.unconfirmed = fire.unconfirmed or {}
             if name == sender then
                 fire.unconfirmed[name] = nil
@@ -483,14 +579,12 @@ function handlers.R(sender, fields)
     end
 
     -- a report only gets to say how long a fire has left if it's news to us
-    if isNew then
-        Campfires.LimitBurnTime(fire, ReadNumber(fields[12], 0, Campfires.BURN_TIME), fields[13] == "e")
-    end
+    if isNew then Campfires.LimitBurnTime(fire, burnTime, fields[13] == "e") end
     TakeItems(fire, fields[11])
 end
 
 function handlers.L(sender, fields)
-    local position = ReadPosition(fields)
+    local position = ReadPosition(sender, fields)
     local fire = position and Campfires.FindFire(position)
     if fire and fire.people[sender] then
         fire.people[sender] = nil
@@ -502,7 +596,7 @@ end
 -- Only someone at the fire can say it's gone out, and it only goes once nobody
 -- else is left there. Anyone really still there would notice it go out too.
 function handlers.X(sender, fields)
-    local position = ReadPosition(fields)
+    local position = ReadPosition(sender, fields)
     local fire = position and Campfires.FindFire(position)
     if not fire then return end
     local left = lastLeft[sender]
@@ -517,14 +611,15 @@ function handlers.X(sender, fields)
     end
 end
 
-function handlers.Q(_, fields)
+function handlers.Q(sender, fields)
     local mapID = ReadNumber(fields[3], 1, 1000000)
-    if mapID then OnZoneQuestion(mapID) end
+    if not mapID then return Strike(sender) end
+    OnZoneQuestion(mapID)
 end
 
-function handlers.W(_, fields)
+function handlers.W(sender, fields)
     local id = fields[3] and fields[3]:match("^%x%x%x%x$")
-    if not id then return end
+    if not id then return Strike(sender) end
     lastAskedFor[id] = GetTime() -- someone else asked, so we'll hear the answer too
     wordingsToAskFor[id] = nil
     if Campfires.db.wordings[id] and GetTime() - (lastAnsweredWording[id] or -math.huge) >= ANSWER_COOLDOWN then
@@ -534,11 +629,12 @@ function handlers.W(_, fields)
     end
 end
 
-local function OnWordingAnswer(id, wording)
+local function OnWordingAnswer(sender, id, wording)
     wordingsToAnswer[id] = nil
-    if Campfires.db.wordings[id] or not Campfires.IsCleanWording(wording) or WordingID(wording) ~= id then
-        return
-    end
+    -- no real copy of the addon shares a wording with codes in it, or one that
+    -- doesn't match its ID; long ones only just started being turned down
+    if wording:find("[%c|]") or WordingID(wording) ~= id then return Strike(sender) end
+    if Campfires.db.wordings[id] or not Campfires.IsCleanWording(wording) then return end
     Campfires.db.wordings[id] = wording
     Campfires.Refresh()
 end
@@ -547,12 +643,12 @@ function Campfires.OnAddonMessage(prefix, message, _, sender)
     if prefix ~= PREFIX then return end
     sender = WithoutRealm(sender)
     if sender == Campfires.playerName then return end -- the channel echoes our own messages back
-    if not IsPlayerName(sender) or IsFlooding(sender) then return end
+    if not IsPlayerName(sender) or Campfires.IsIgnored(sender) or IsFlooding(sender) then return end
 
     -- a wording can have "|" in it, so T isn't split up
     local id, wording = message:match("^T|" .. PROTOCOL .. "|(%x%x%x%x)|(.+)$")
     if id then
-        OnWordingAnswer(id, wording)
+        OnWordingAnswer(sender, id, wording)
         return
     end
 

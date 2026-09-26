@@ -1,5 +1,7 @@
 # Campfires
 
+![Campfires](screenshots/campfires.png)
+
 A World of Warcraft addon for WoW Forever that shows you where other players
 have set up camp. When someone running Campfires sits down at a campfire,
 everyone else running it sees the fire on their world map and minimap, who's
@@ -26,6 +28,10 @@ there, what's set up around it, and how long it has left.
 - A name with a `?` after it was passed on by another player and hasn't been
   confirmed yet.
 
+![A fire's tooltip, showing who's there, how long it has left and what's at the camp](screenshots/tooltip.png)
+
+![A campfire on the world map next to Brill](screenshots/map-pin.png)
+
 Campfires burn for 15 minutes. A fire disappears from the map when its time is
 up, three minutes after everyone has left it, or straight away if someone
 sitting at it sees it go out.
@@ -45,6 +51,8 @@ sitting at it sees it go out.
 | `/fires range <yards>` | How close a new fire has to be for a raid warning (default 250) |
 | `/fires linger <seconds>` | How long fires nobody is at stay listed (default 180) |
 | `/fires minimap` | Show or hide the minimap button |
+| `/fires ignore <name>` | Hide someone's fires and name (on its own, lists who you're ignoring) |
+| `/fires unignore <name>` | See someone's fires again |
 | `/fires clear` | Forget every fire |
 | `/fires camp` | Show what your Camp Benefits buff says is at the camp |
 
@@ -54,3 +62,10 @@ Only fires you're sitting at are shared, along with your character name and
 class. Use the Share button in the window, or `/fires share`, to share with
 everyone, only your guild and group, or nobody. You'll still see other
 people's fires whichever you choose.
+
+## Blocking players
+
+Campfires ignores anyone on your in-game ignore list, and `/fires ignore
+<name>` hides someone from Campfires only. Anyone sending fake campfire data
+is muted automatically for an hour, and you'll get a message naming them.
+Addons can't ban players, so if someone keeps at it, report them in game.
