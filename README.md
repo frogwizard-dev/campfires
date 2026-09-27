@@ -9,10 +9,13 @@ there, what's set up around it, and how long it has left.
 
 ## Install
 
-1. Download `Campfires.zip` from the
+1. Download the Campfires zip from the
    [latest release](https://github.com/frogwizard-dev/campfires/releases/latest).
 2. Unzip it into `World of Warcraft\_classic_beta_\Interface\AddOns\`, so that
-   you have an `AddOns\Campfires` folder containing `Campfires.toc`.
+   you have an `AddOns\Campfires` folder containing `Campfires.toc`. Windows'
+   Extract All adds an extra folder named after the zip, so if you end up with
+   `AddOns\Campfires-0.12.2\Campfires`, move the inner `Campfires` folder up
+   into `AddOns`.
 3. Start the game (restart it if it was already running) and check that the
    addon is enabled on the character select screen (AddOns button).
 
