@@ -9,8 +9,17 @@ local ALERT_COOLDOWN = 20
 local BASIC_CAMPFIRE = 818
 
 Campfires.BURN_TIME = BURN_TIME
-Campfires.playerName = UnitName("player")
-Campfires.playerClass = select(2, UnitClass("player"))
+-- On a fresh login the game can still call you "Unknown" while addons load, so
+-- this gets asked again once you're in the world.
+local function LearnPlayer()
+    Campfires.playerName = UnitName("player")
+    Campfires.playerClass = select(2, UnitClass("player"))
+end
+LearnPlayer()
+
+function Campfires.IsPlayerKnown()
+    return Campfires.playerClass ~= nil and Campfires.playerName ~= UNKNOWNOBJECT
+end
 Campfires.fires = {}
 
 Campfires.SHARE_OPTIONS = {
@@ -547,7 +556,10 @@ function events.ADDON_LOADED(name)
     end)
 end
 
+events.PLAYER_LOGIN = LearnPlayer
+
 function events.PLAYER_ENTERING_WORLD()
+    LearnPlayer()
     if hasEnteredWorld then
         Campfires.AskAboutZone()
     else

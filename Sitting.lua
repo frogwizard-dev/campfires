@@ -194,7 +194,7 @@ local function ResumeAfterReload(here)
 end
 
 function Campfires.UpdateSitting()
-    if InCombatLockdown() then return end
+    if InCombatLockdown() or not Campfires.IsPlayerKnown() then return end
     Campfires.PruneFires()
     if currentFire and time() >= currentFire.burnsOut then StopSitting() end
 

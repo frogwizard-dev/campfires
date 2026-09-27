@@ -115,7 +115,7 @@ end
 
 function Campfires.SendHeartbeat(fire, items)
     local head = string.format("H|%d|%s|", PROTOCOL, PositionFields(fire))
-    Send(WithItems(head, items, "|" .. Campfires.playerClass .. "|" .. BurnFields(fire)))
+    Send(WithItems(head, items, "|" .. (Campfires.playerClass or "") .. "|" .. BurnFields(fire)))
 end
 
 function Campfires.SendFireReport(fire)
@@ -218,6 +218,9 @@ end
 
 local function SplitNumbers(effect)
     effect = effect:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+    -- "1 |4hour:hours;" is the game's "hour or hours, whichever fits". Keep both
+    -- as "[hour/hours]" and pick one when the number goes back in (ItemLine).
+    effect = effect:gsub("|4([^:;|]*):([^;|]*);", "[%1/%2]")
     local numbers = {}
     local wording = effect:gsub("%d+%.?%d*", function(number)
         local after = ""
@@ -289,10 +292,14 @@ function Campfires.ItemLine(item)
     local wording = item.wordingID and Campfires.db.wordings[item.wordingID]
     if wording then
         local i = 0
-        return name .. ": " .. wording:gsub("#", function()
+        local text = wording:gsub("#", function()
             i = i + 1
             return item.numbers[i] or "?"
         end)
+        text = text:gsub("(%d+%.?%d*)(%s*)%[([^/%]]*)/([^%]]*)%]", function(number, space, one, many)
+            return number .. space .. (tonumber(number) == 1 and one or many)
+        end)
+        return name .. ": " .. text
     end
     if #item.numbers > 0 then return name .. " (" .. table.concat(item.numbers, ", ") .. ")" end
     return name
@@ -566,7 +573,9 @@ function handlers.R(sender, fields)
         if not IsPlayerName(name) then return Strike(sender) end
         -- don't let an old report put us back at a fire we've left
         local isUs = name == Campfires.playerName and not Campfires.IsAtFire()
-        if not isUs and not Campfires.IsIgnored(name) and (fire.people[name] or 0) < seenAt then
+        -- versions up to 0.12 could list someone as "Unknown" straight after logging in
+        local isUnknown = name == UNKNOWNOBJECT
+        if not isUs and not isUnknown and not Campfires.IsIgnored(name) and (fire.people[name] or 0) < seenAt then
             fire.unconfirmed = fire.unconfirmed or {}
             if name == sender then
                 fire.unconfirmed[name] = nil
@@ -640,7 +649,8 @@ local function OnWordingAnswer(sender, id, wording)
 end
 
 function Campfires.OnAddonMessage(prefix, message, _, sender)
-    if prefix ~= PREFIX then return end
+    -- until we know our own name we can't tell our echoed messages from anyone else's
+    if prefix ~= PREFIX or not Campfires.IsPlayerKnown() then return end
     sender = WithoutRealm(sender)
     if sender == Campfires.playerName then return end -- the channel echoes our own messages back
     if not IsPlayerName(sender) or Campfires.IsIgnored(sender) or IsFlooding(sender) then return end
